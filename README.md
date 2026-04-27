@@ -1,36 +1,89 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+JudgeNet
 
-## Getting Started
+A full-stack platform to detect, analyze, and continuously monitor bias in machine learning models.
 
-First, run the development server:
+🚀 Overview
 
-```bash
+This project helps developers and organizations understand whether their models are fair or biased, and how that bias evolves over time.
+
+Instead of one-time checks, it enables continuous monitoring, alerting users when bias increases or models start behaving unfairly.
+
+✨ Key Features
+🔍 Bias Detection
+Computes fairness metrics using AIF360
+Supports:
+Statistical Parity Difference (SPD)
+Disparate Impact
+Mean Difference
+Automatically detects:
+Protected attribute (e.g. gender)
+Target variable
+🤖 Model Bias Analysis
+Accepts external model API endpoints
+Compares:
+Dataset bias vs Model bias
+Verdicts:
+Model amplifies bias
+Model reduces bias
+Model mirrors dataset bias
+⏱ Continuous Monitoring
+Schedule bias checks (daily/weekly)
+Tracks bias trends over time
+Stores results in database
+🚨 Alert System
+Detects:
+Sudden bias spikes
+Model drift
+Bias amplification
+Highlights critical fairness issues
+📊 Monitoring Dashboard
+Day-wise and week-wise trend analysis
+Interactive charts
+Key insights:
+Bias increase %
+Dataset vs model comparison
+Clean and minimal UI
+🛠 Tech Stack
+Frontend
+Next.js (TypeScript)
+Tailwind CSS
+Recharts (for visualization)
+Backend
+Flask (Python)
+AIF360 (fairness metrics)
+Database
+SQLite (monitoring results)
+📁 Project Structure
+├── src/                # Frontend (Next.js)
+├── public/             # Static assets
+├── app.py              # Backend (Flask API)
+├── model_api.py        # Sample model API
+├── demo-data/          # Sample dataset
+├── uploads/            # Runtime uploads (ignored in Git)
+├── package.json
+└── README.md
+▶️ How to Run Locally
+1️⃣ Backend
+pip install -r requirements.txt
+python app.py
+
+Runs on:
+
+http://localhost:5001
+2️⃣ Frontend
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Runs on:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+http://localhost:3000
+🧪 How to Use
+Upload a dataset (CSV/XLS)
+(Optional) Provide a model API URL
+Click Analyze
+View:
+Dataset bias
+Model bias
+Comparison verdict
+Enable Monitoring
+Track bias over time in dashboard
