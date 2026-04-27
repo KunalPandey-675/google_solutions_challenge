@@ -18,6 +18,7 @@ Mean Difference
 Automatically detects:
 Protected attribute (e.g. gender)
 Target variable
+
 🤖 Model Bias Analysis
 Accepts external model API endpoints
 Compares:
@@ -26,16 +27,19 @@ Verdicts:
 Model amplifies bias
 Model reduces bias
 Model mirrors dataset bias
+
 ⏱ Continuous Monitoring
 Schedule bias checks (daily/weekly)
 Tracks bias trends over time
 Stores results in database
+
 🚨 Alert System
 Detects:
 Sudden bias spikes
 Model drift
 Bias amplification
 Highlights critical fairness issues
+
 📊 Monitoring Dashboard
 Day-wise and week-wise trend analysis
 Interactive charts
@@ -43,6 +47,7 @@ Key insights:
 Bias increase %
 Dataset vs model comparison
 Clean and minimal UI
+
 🛠 Tech Stack
 Frontend
 Next.js (TypeScript)
