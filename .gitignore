@@ -45,3 +45,6 @@ pnpm-debug.log*
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Project uploads (large user-uploaded files)
+uploads/
