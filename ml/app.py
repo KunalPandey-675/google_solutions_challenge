@@ -9,11 +9,17 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any, Optional, Tuple
 
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 import pandas as pd
 import requests
 from aif360.datasets import BinaryLabelDataset
 from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, scoped_session, sessionmaker
 
@@ -36,6 +42,7 @@ except ImportError:  # pragma: no cover - optional dependency
 
 
 app = Flask(__name__)
+CORS(app)
 
 
 @app.route("/health", methods=["GET"])
@@ -755,7 +762,7 @@ def detect_with_gemini(df: pd.DataFrame, heuristic_protected_col: Optional[str],
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-3-flash-preview")
         response = model.generate_content(prompt)
         raw_text = ""
         if response is not None and getattr(response, "text", None):
@@ -1431,7 +1438,7 @@ def get_agent_runtime() -> Optional[dict[str, Any]]:
         return None
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemini-3-flash-preview",
         temperature=0,
         google_api_key=os.getenv("GEMINI_API_KEY", ""),
     )
@@ -1768,6 +1775,109 @@ def delete_job(job_id: int) -> Any:
     except Exception as exc:
         logger.exception("Error deleting monitoring job %s: %s", job_id, exc)
         return jsonify({"success": False, "error": "Failed to delete monitoring job", "details": str(exc)}), 500
+
+
+@app.route("/api/dashboard-summary", methods=["POST"])
+def dashboard_summary() -> Any:
+    """Generate a natural language summary of the dashboard using Gemini API."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        
+        # Extract dashboard metrics from request
+        total_jobs = payload.get("total_jobs", 0)
+        active_alerts = payload.get("active_alerts", 0)
+        latest_model_spd = payload.get("latest_model_spd")
+        latest_dataset_spd = payload.get("latest_dataset_spd")
+        bias_difference = payload.get("bias_difference")
+        risk_level = payload.get("risk_level", "LOW")
+        monitoring_jobs_data = payload.get("monitoring_jobs", [])
+        insights = payload.get("insights", {})
+        
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            logger.warning("GEMINI_API_KEY not set; skipping Gemini dashboard summary")
+            return jsonify({
+                "success": True,
+                "summary": "Dashboard monitoring is active. Configure GEMINI_API_KEY to enable AI-powered summaries.",
+                "generated": False
+            })
+        
+        if genai is None:
+            logger.warning("google-generativeai package is not installed")
+            return jsonify({
+                "success": True,
+                "summary": "Dashboard monitoring is active. Install google-generativeai to enable AI-powered summaries.",
+                "generated": False
+            })
+        
+        # Build context for Gemini
+        jobs_context = "\n".join([
+            f"- {job.get('dataset_name', 'Unknown')}: {job.get('frequency')} monitoring, "
+            f"last run {job.get('last_run', 'Never')}, "
+            f"next run {job.get('next_run', 'Manual')}"
+            for job in monitoring_jobs_data
+        ]) if monitoring_jobs_data else "No active monitoring jobs"
+        
+        prompt = f"""You are a bias monitoring dashboard analyst. Provide a concise executive summary of the current monitoring status based on these metrics:
+
+Dashboard Summary:
+- Total Monitoring Jobs: {total_jobs}
+- Active Alerts: {active_alerts}
+- Latest Model SPD: {latest_model_spd}
+- Latest Dataset SPD: {latest_dataset_spd}
+- Bias Difference (Model - Dataset): {bias_difference}
+- Overall Risk Level: {risk_level}
+
+Monitoring Jobs:
+{jobs_context}
+
+Key Insights:
+- Bias Trend: {insights.get('summary', 'No trend data')}
+- Recommendation: {insights.get('recommendation', 'Continue monitoring')}
+- Model Trend Change: {insights.get('modelTrendChange', 'N/A')}%
+
+Provide a 2-3 sentence professional summary that:
+1. Describes the current bias monitoring state
+2. Highlights any critical issues if risk is HIGH
+3. Recommends next steps for the team
+
+Keep it concise and actionable."""
+
+        try:
+            genai.configure(api_key=api_key)
+            summary_model = os.getenv("GEMINI_SUMMARY_MODEL", "gemini-3-flash-preview")
+            model = genai.GenerativeModel(summary_model)
+            response = model.generate_content(prompt)
+            
+            summary_text = ""
+            if response is not None and getattr(response, "text", None):
+                summary_text = response.text.strip()
+            
+            if not summary_text:
+                summary_text = "Unable to generate summary. Please check your dashboard data."
+            
+            logger.info("Generated dashboard summary using Gemini API")
+            
+            return jsonify({
+                "success": True,
+                "summary": summary_text,
+                "generated": True,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+        except Exception as api_exc:
+            logger.exception("Gemini API call failed: %s", api_exc)
+            return jsonify({
+                "success": False,
+                "error": "Failed to generate summary",
+                "details": str(api_exc)
+            }), 500
+    except Exception as exc:
+        logger.exception("Error generating dashboard summary: %s", exc)
+        return jsonify({
+            "success": False,
+            "error": "Failed to generate dashboard summary",
+            "details": str(exc)
+        }), 500
 
 
 @app.route("/detect-bias", methods=["POST"])

@@ -244,6 +244,18 @@ export function ProductDashboard() {
 
       setAnalysisResult(analyzeData);
       setHasAnalyzed(true);
+      
+      // Log SPD values to browser console for testing
+      console.log("%c[BIAS ANALYSIS RESULTS]", "color: #2563EB; font-weight: bold; font-size: 14px;");
+      console.log("%cProtected Column: %s", "color: #64748B;", analyzeData.detected_protected);
+      console.log("%cTarget Column: %s", "color: #64748B;", analyzeData.detected_target);
+      console.log("%cModel SPD (Statistical Parity Difference): %s", "color: #DC2626; font-weight: bold;", analyzeData.metrics.statistical_parity_difference ?? "N/A");
+      console.log("%cDisparate Impact: %s", "color: #F97316;", analyzeData.metrics.disparate_impact ?? "N/A");
+      console.log("%cEqual Opportunity Difference: %s", "color: #8B5CF6;", analyzeData.metrics.equal_opportunity_difference ?? "N/A");
+      console.log("%cAverage Odds Difference: %s", "color: #06B6D4;", analyzeData.metrics.average_odds_difference ?? "N/A");
+      console.log("%cSeverity Level: %s", analyzeData.severity === "HIGH" ? "color: #EF4444; font-weight: bold;" : "color: #10B981; font-weight: bold;", analyzeData.severity);
+      console.log("%cBias Verdict: %s", "color: #6366F1;", analyzeData.bias_comparison?.verdict ?? analyzeData.insight ?? "N/A");
+      console.log("%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "color: #2563EB;");
 
       if (!monitoringEnabled) {
         return;
@@ -267,13 +279,23 @@ export function ProductDashboard() {
         throw new Error(createJobData.error ?? "Failed to create monitoring setup");
       }
 
+      console.log("%c[MONITORING JOB CREATED]", "color: #10B981; font-weight: bold; font-size: 14px;");
+      console.log("%cJob ID: %s", "color: #64748B;", createJobData.job_id);
+      console.log("%cNext Scheduled Run: %s", "color: #64748B;", createJobData.next_run ?? "Manual");
+      console.log("%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "color: #10B981;");
+
       setMonitoringMessage("Monitoring enabled and initial analysis completed");
       // The polling hook will automatically fetch the updated job list from the backend
     } catch (submitError) {
+      const errorMsg = submitError instanceof Error ? submitError.message : "Unexpected error";
+      console.error("%c[ERROR] Bias Analysis Failed", "color: #EF4444; font-weight: bold; font-size: 14px;");
+      console.error("%cError Details: %s", "color: #64748B;", errorMsg);
+      console.error(submitError);
+      
       if (submitError instanceof Error && submitError.message === "Failed to fetch") {
         setError("Failed to reach the backend. Make sure the Next.js app and Flask API are both running.");
       } else {
-        setError(submitError instanceof Error ? submitError.message : "Unexpected error");
+        setError(errorMsg);
       }
     } finally {
       setIsSubmitting(false);

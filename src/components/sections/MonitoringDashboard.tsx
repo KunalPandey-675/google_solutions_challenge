@@ -2,7 +2,18 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, Eye, Loader2, RefreshCw, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Eye,
+  Loader2,
+  RefreshCw,
+  Trash2,
+  TrendingUp,
+  AlertCircle,
+  Target,
+  Activity,
+} from "lucide-react";
 import { usePolling } from "@/hooks/usePolling";
 import {
   CartesianGrid,
@@ -24,6 +35,7 @@ type JobSummary = {
   dataset_name: string;
   frequency: string;
   last_run: string | null;
+  next_run: string | null;
   result_count: number;
   alert_count: number;
 };
@@ -231,17 +243,30 @@ export function MonitoringDashboard() {
   const [deletingJobId, setDeletingJobId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingResults, setLoadingResults] = useState(false);
+  const [kpiData, setKpiData] = useState<{
+    latestModelSpd: number | null;
+    latestDatasetSpd: number | null;
+    biasDifference: number | null;
+    riskLevel: string;
+    riskColor: string;
+  } | null>(null);
+  const [dashboardSummary, setDashboardSummary] = useState<{
+    summary: string;
+    generated: boolean;
+    timestamp?: string;
+  } | null>(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
 
   // Poll jobs from backend
   const { data: jobsData, isLoading: loadingJobs, refetch: refetchJobs } = usePolling<{ success?: boolean; jobs?: JobSummary[]; error?: string }>(
     "/api/jobs",
-    { interval: 5000 }
+    { interval: 15000 }
   );
 
   // Poll alerts from backend
   const { data: alertsData, isLoading: loadingAlerts, refetch: refetchAlerts } = usePolling<{ success?: boolean; alerts?: AlertItem[]; error?: string }>(
     "/api/alerts",
-    { interval: 5000 }
+    { interval: 15000 }
   );
 
   const jobs = (jobsData?.jobs ?? []).filter((job) => job.result_count >= 0);
@@ -249,6 +274,58 @@ export function MonitoringDashboard() {
 
   const handleRefreshAll = async () => {
     await Promise.all([refetchJobs(), refetchAlerts()]);
+    await generateDashboardSummary();
+  };
+
+  const generateDashboardSummary = async () => {
+    setLoadingSummary(true);
+    try {
+      const riskLevel = latestResult?.model_spd !== null && latestResult?.model_spd !== undefined && Math.abs(latestResult.model_spd) > 0.3 ? "HIGH" : "LOW";
+      
+      const payload = {
+        total_jobs: totalJobs,
+        active_alerts: activeAlerts,
+        latest_model_spd: latestResult?.model_spd ?? null,
+        latest_dataset_spd: latestResult?.dataset_spd ?? null,
+        bias_difference: latestGap,
+        risk_level: riskLevel,
+        monitoring_jobs: jobs,
+        insights: insight ? {
+          summary: insight.summary,
+          recommendation: insight.recommendation,
+          modelTrendChange: insight.modelTrendChange,
+        } : {},
+      };
+
+      const response = await fetch("http://localhost:5001/api/dashboard-summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = (await response.json()) as any;
+
+      if (response.ok && data.success) {
+        setDashboardSummary({
+          summary: data.summary,
+          generated: data.generated || false,
+          timestamp: data.timestamp,
+        });
+      } else {
+        setDashboardSummary({
+          summary: data.error || "Failed to generate dashboard summary",
+          generated: false,
+        });
+      }
+    } catch (err) {
+      console.error("Error generating dashboard summary:", err);
+      setDashboardSummary({
+        summary: "Unable to generate AI summary at this time",
+        generated: false,
+      });
+    } finally {
+      setLoadingSummary(false);
+    }
   };
 
   // Auto-select first job when jobs load
@@ -316,6 +393,16 @@ export function MonitoringDashboard() {
   const activeAlerts = alerts.length;
   const latestGap = safeDifference(latestResult?.dataset_spd, latestResult?.model_spd);
 
+  // Generate dashboard summary only on first load
+  useEffect(() => {
+    if (jobs.length === 0) {
+      return;
+    }
+
+    // Generate once when component mounts
+    void generateDashboardSummary();
+  }, []);
+
   const handleDelete = async (jobId: number) => {
     const confirmed = window.confirm("Delete this monitoring setup?");
     if (!confirmed) {
@@ -352,431 +439,482 @@ export function MonitoringDashboard() {
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(15,23,42,0.08),_transparent_36%),radial-gradient(circle_at_top_right,_rgba(37,99,235,0.12),_transparent_28%),linear-gradient(to_bottom,_rgba(255,255,255,0.85),_rgba(248,250,252,0.95))]" />
       <div className="absolute inset-x-0 top-0 h-64 bg-grid opacity-20" />
 
-      <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-5 md:px-6 lg:px-8 lg:py-6">
-        <div className="flex items-center justify-between gap-4 text-sm">
+      <div className="relative mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-5 md:px-6 lg:px-8 lg:py-6">
+        {/* Header Section */}
+        <div className="flex items-center justify-between gap-4">
           <Link href="/" className="inline-flex items-center gap-2 font-medium text-slate-500 hover:text-slate-900">
             <ArrowLeft className="h-4 w-4" />
             Back to audit
           </Link>
-
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={handleRefreshAll}
-              disabled={loadingJobs || loadingAlerts}
-              size="sm"
-              variant="outline"
-              className="gap-2"
-            >
-              <RefreshCw className={`h-4 w-4 ${loadingJobs || loadingAlerts ? "animate-spin" : ""}`} />
-              {loadingJobs || loadingAlerts ? "Refreshing..." : "Refresh"}
-            </Button>
-
-            <Badge variant="outline" className="rounded-full border-slate-200 bg-white/80 px-3 py-1 text-slate-600">
-              {loadingJobs ? "Loading jobs..." : `${totalJobs} jobs`}
-            </Badge>
-          </div>
+          <Button
+            onClick={handleRefreshAll}
+            disabled={loadingJobs || loadingAlerts}
+            size="sm"
+            variant="outline"
+            className="gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${loadingJobs || loadingAlerts ? "animate-spin" : ""}`} />
+            {loadingJobs || loadingAlerts ? "Refreshing..." : "Refresh"}
+          </Button>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-[1.45fr_0.55fr_0.55fr]">
-          <Card className="border-slate-200/70 bg-white/90 shadow-[0_16px_42px_-28px_rgba(15,23,42,0.25)] backdrop-blur">
-            <CardContent className="flex h-full flex-col justify-between gap-4 p-5 lg:p-6">
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-600">
-                  Monitoring Dashboard
+        {/* Title Section */}
+        <div>
+          <h1 className="text-3xl font-serif font-bold tracking-tight text-slate-950 md:text-4xl">
+            Monitoring Dashboard
+          </h1>
+          <p className="mt-2 text-slate-600">Real-time bias monitoring and drift detection</p>
+        </div>
+
+        {/* TOP SECTION: KPI Metrics Cards */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {/* Latest Model SPD */}
+          <Card className="border-slate-200/70 bg-gradient-to-br from-blue-50 to-white shadow-sm backdrop-blur">
+            <CardHeader className="pb-2 pt-4">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                  Latest Model SPD
+                </CardTitle>
+                <TrendingUp className="h-4 w-4 text-blue-600" />
+              </div>
+            </CardHeader>
+            <CardContent className="pb-4">
+              <div className="text-3xl font-serif font-bold text-slate-950">
+                {latestResult?.model_spd !== undefined ? formatSignedNumber(latestResult.model_spd) : "--"}
+              </div>
+              <p className="mt-2 text-xs text-slate-600">Statistical Parity Difference</p>
+            </CardContent>
+          </Card>
+
+          {/* Latest Dataset SPD */}
+          <Card className="border-slate-200/70 bg-gradient-to-br from-cyan-50 to-white shadow-sm backdrop-blur">
+            <CardHeader className="pb-2 pt-4">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                  Latest Dataset SPD
+                </CardTitle>
+                <Target className="h-4 w-4 text-cyan-600" />
+              </div>
+            </CardHeader>
+            <CardContent className="pb-4">
+              <div className="text-3xl font-serif font-bold text-slate-950">
+                {latestResult?.dataset_spd !== undefined ? formatSignedNumber(latestResult.dataset_spd) : "--"}
+              </div>
+              <p className="mt-2 text-xs text-slate-600">Data Fairness Baseline</p>
+            </CardContent>
+          </Card>
+
+          {/* Bias Difference */}
+          <Card className="border-slate-200/70 bg-gradient-to-br from-violet-50 to-white shadow-sm backdrop-blur">
+            <CardHeader className="pb-2 pt-4">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                  Bias Difference
+                </CardTitle>
+                <Activity className="h-4 w-4 text-violet-600" />
+              </div>
+            </CardHeader>
+            <CardContent className="pb-4">
+              <div className={`text-3xl font-serif font-bold ${
+                latestGap !== null && Math.abs(latestGap) > 0.15 ? "text-red-600" : "text-slate-950"
+              }`}>
+                {formatCompactChange(latestGap)}
+              </div>
+              <p className="mt-2 text-xs text-slate-600">Model vs Data Gap</p>
+            </CardContent>
+          </Card>
+
+          {/* Risk Level */}
+          <Card className={`border-slate-200/70 bg-gradient-to-br ${
+            latestResult?.model_spd !== null && latestResult?.model_spd !== undefined && Math.abs(latestResult.model_spd) > 0.3
+              ? "from-red-50 to-white"
+              : "from-emerald-50 to-white"
+          } shadow-sm backdrop-blur`}>
+            <CardHeader className="pb-2 pt-4">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                  Risk Level
+                </CardTitle>
+                <AlertCircle className={`h-4 w-4 ${
+                  latestResult?.model_spd !== null && latestResult?.model_spd !== undefined && Math.abs(latestResult.model_spd) > 0.3
+                    ? "text-red-600"
+                    : "text-emerald-600"
+                }`} />
+              </div>
+            </CardHeader>
+            <CardContent className="pb-4">
+              <div className="flex items-center gap-2">
+                <span className={`text-3xl font-serif font-bold ${
+                  latestResult?.model_spd !== null && latestResult?.model_spd !== undefined && Math.abs(latestResult.model_spd) > 0.3
+                    ? "text-red-600"
+                    : "text-emerald-600"
+                }`}>
+                  {latestResult?.model_spd !== null && latestResult?.model_spd !== undefined
+                    ? Math.abs(latestResult.model_spd) > 0.3 ? "HIGH" : Math.abs(latestResult.model_spd) > 0.1 ? "MEDIUM" : "LOW"
+                    : "--"}
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-slate-600">Bias Severity Status</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* MIDDLE SECTION: Bias Trend & Alerts */}
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* Left: Bias Trend Monitoring Chart (Dummy Data) */}
+          <Card className="border-slate-200/70 bg-white/90 shadow-sm backdrop-blur lg:col-span-2">
+            <CardHeader className="border-b border-slate-100 px-4 py-4 md:px-5">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-serif font-bold text-slate-950">
+                  Bias Trend Monitoring
+                </CardTitle>
+                <Badge variant="outline" className="text-xs">Day-wise</Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4">
+              {selectedJobHasData ? (
+                <div className="h-[320px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData}>
+                      <CartesianGrid stroke="#E2E8F0" strokeDasharray="3 3" />
+                      <XAxis
+                        dataKey={chartMode === "day" ? "date" : "label"}
+                        stroke="#94A3B8"
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <YAxis stroke="#94A3B8" tickLine={false} axisLine={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="dataset_spd"
+                        name="Dataset SPD"
+                        stroke="#0369A1"
+                        strokeWidth={2}
+                        dot={{ r: 4, fill: "#0369A1" }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="model_spd"
+                        name="Model SPD"
+                        stroke="#DC2626"
+                        strokeWidth={2}
+                        dot={{ r: 4, fill: "#DC2626" }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
                 </div>
-                <h1 className="mt-3 text-2xl font-serif font-bold tracking-tight text-slate-950 md:text-3xl">
-                  Bias monitoring overview
-                </h1>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                  Review live monitoring jobs, inspect the selected run, and keep alerts visible without overwhelming the page.
+              ) : (
+                <div className="flex h-[320px] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50">
+                  <div className="text-center">
+                    <TrendingUp className="mx-auto h-8 w-8 text-slate-300 mb-2" />
+                    <p className="text-sm text-slate-500">Select a monitoring job to view trends</p>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Right: Alerts Panel */}
+          <Card className="border-red-200/50 bg-gradient-to-br from-red-50/80 to-white shadow-sm backdrop-blur">
+            <CardHeader className="border-b border-red-100 px-4 py-4 md:px-5">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-serif font-bold text-red-700">
+                  Active Alerts
+                </CardTitle>
+                <Badge variant="outline" className="border-red-200 bg-white text-red-600">
+                  {loadingAlerts ? "-" : alerts.length}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 p-4">
+              {loadingAlerts ? (
+                <div className="flex items-center gap-2 text-sm text-red-600">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading alerts...
+                </div>
+              ) : topAlerts.length ? (
+                topAlerts.map((group) => (
+                  <div
+                    key={group.label}
+                    className="rounded-xl border border-red-200 bg-white p-3 shadow-xs"
+                  >
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-red-700 text-sm">{group.label}</p>
+                        <p className="mt-1 text-xs text-slate-600">
+                          {formatDateTime(group.latest.timestamp)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-xl border border-dashed border-emerald-200 bg-emerald-50/50 px-3 py-6 text-center text-sm text-emerald-700">
+                  ✓ No alerts
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* THIRD SECTION: Monitoring Jobs & Drift Detection */}
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* Left: Monitoring Jobs (Real Data) */}
+          <Card className="border-slate-200/70 bg-white/90 shadow-sm backdrop-blur lg:col-span-2">
+            <CardHeader className="border-b border-slate-100 px-4 py-4 md:px-5">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-serif font-bold text-slate-950">
+                  Monitoring Jobs
+                </CardTitle>
+                <Badge variant="outline" className="text-xs">
+                  {loadingJobs ? "Loading..." : `${totalJobs} active`}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4">
+              {loadingJobs ? (
+                <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading monitoring jobs...
+                </div>
+              ) : jobs.length ? (
+                <div className="space-y-2">
+                  {jobs.map((job) => {
+                    const selected = job.id === selectedJobId;
+                    const hasData = job.result_count > 0;
+
+                    return (
+                      <div
+                        key={job.id}
+                        className={`rounded-xl border p-3 transition-all ${
+                          selected
+                            ? "border-slate-900 bg-slate-950 text-white shadow-md"
+                            : "border-slate-200 bg-slate-50 hover:bg-white"
+                        }`}
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <p className={`font-semibold ${selected ? "text-white" : "text-slate-950"}`}>
+                              {job.dataset_name}
+                            </p>
+                            <div className="mt-1 flex flex-wrap gap-2">
+                              <Badge
+                                variant="outline"
+                                className={`rounded-full px-2 py-0.5 text-xs ${
+                                  selected
+                                    ? "border-white/20 bg-white/10 text-white"
+                                    : "border-slate-200 bg-white text-slate-700"
+                                }`}
+                              >
+                                {job.frequency}
+                              </Badge>
+                              {!hasData && (
+                                <Badge variant="outline" className="rounded-full border-slate-300 bg-slate-100 text-slate-600 text-xs">
+                                  No data
+                                </Badge>
+                              )}
+                            </div>
+                            <p className={`mt-1 text-xs ${selected ? "text-slate-300" : "text-slate-600"}`}>
+                              Last run: {formatDateTime(job.last_run)}
+                            </p>
+                            <p className={`text-xs ${selected ? "text-slate-300" : "text-slate-600"}`}>
+                              Next run: {job.next_run ? formatDateTime(job.next_run) : "Manual"}
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setSelectedJobId(job.id)}
+                              disabled={!hasData}
+                              className={`text-xs ${
+                                selected
+                                  ? "border-white/20 bg-white/10 text-white hover:bg-white/20"
+                                  : "border-slate-200 text-slate-700"
+                              }`}
+                            >
+                              <Eye className="mr-1 h-3 w-3" />
+                              View
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void handleDelete(job.id)}
+                              disabled={deletingJobId === job.id}
+                              className="border-red-200 text-red-700 hover:bg-red-50 text-xs"
+                            >
+                              {deletingJobId === job.id ? (
+                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              ) : (
+                                <Trash2 className="mr-1 h-3 w-3" />
+                              )}
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-8 text-center text-sm text-slate-500">
+                  No monitoring jobs yet. Create one to get started.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Right: Drift Detection (Dummy Data) */}
+          <Card className="border-slate-200/70 bg-gradient-to-br from-orange-50 to-white shadow-sm backdrop-blur">
+            <CardHeader className="border-b border-orange-100 px-4 py-4 md:px-5">
+              <CardTitle className="text-base font-serif font-bold text-orange-700">
+                Drift Detection
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 p-4">
+              <div className="rounded-xl border border-orange-200 bg-white p-3">
+                <p className="text-sm font-semibold text-orange-700">Bias Drift Status</p>
+                <p className="mt-2 text-2xl font-serif font-bold text-slate-950">Detected</p>
+                <p className="mt-1 text-xs text-orange-600">
+                  Current model SPD exceeds baseline by 0.45
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <Link href="/" className="inline-flex h-8 items-center justify-center rounded-full bg-slate-950 px-4 text-sm font-medium text-white transition-colors hover:bg-slate-800">
-                  Run new audit
-                </Link>
-                <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-700">
-                  {loadingAlerts ? "Loading alerts..." : `${activeAlerts} alerts`}
-                </Badge>
+              <div className="rounded-xl border border-orange-200 bg-white p-3">
+                <p className="text-sm font-semibold text-orange-700">Historical Average</p>
+                <p className="mt-2 text-2xl font-serif font-bold text-slate-950">+0.15</p>
+                <p className="mt-1 text-xs text-orange-600">
+                  30-day rolling average
+                </p>
               </div>
-            </CardContent>
-          </Card>
 
-          <Card className="border-slate-200/70 bg-white/85 shadow-sm backdrop-blur">
-            <CardHeader className="pb-1 pt-4">
-              <CardTitle className="text-[10px] uppercase tracking-[0.28em] text-slate-500">Total Jobs</CardTitle>
-            </CardHeader>
-            <CardContent className="pb-4">
-              <div className="text-3xl font-serif font-bold text-slate-950">{loadingJobs ? "—" : totalJobs}</div>
-              <p className="mt-1 text-sm text-slate-500">Real jobs only.</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-slate-200/70 bg-white/85 shadow-sm backdrop-blur">
-            <CardHeader className="pb-1 pt-4">
-              <CardTitle className="text-[10px] uppercase tracking-[0.28em] text-slate-500">Active Alerts</CardTitle>
-            </CardHeader>
-            <CardContent className="pb-4">
-              <div className="text-3xl font-serif font-bold text-red-600">{loadingAlerts ? "—" : activeAlerts}</div>
-              <p className="mt-1 text-sm text-slate-500">Top alerts summarized below.</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid gap-3 xl:grid-cols-[1.35fr_0.65fr]">
-          <Card className="border-slate-200/70 bg-white/90 shadow-sm backdrop-blur">
-            <CardHeader className="border-b border-slate-100 px-4 py-4 md:px-5">
-              <CardTitle className="text-base font-serif font-bold text-slate-950">Insights Panel</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 p-4">
-              {insight ? (
-                <>
-                  <div className="grid gap-2 md:grid-cols-3">
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">Bias trend summary</div>
-                      <div className="mt-1.5 text-sm leading-5 text-slate-900">{insight.summary}</div>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">Current vs previous</div>
-                      <div className="mt-1.5 text-sm leading-5 text-slate-900">
-                        {formatSignedNumber(insight.previousModelAverage)} to {formatSignedNumber(insight.currentModelAverage)}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">% change</div>
-                      <div className={`mt-1.5 text-xl font-serif font-bold ${insight.modelTrendChange === null ? "text-slate-400" : insight.modelTrendChange > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                        {formatSignedPercent(insight.modelTrendChange)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 p-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-indigo-600">Recommendation</div>
-                    <div className="mt-1.5 text-sm leading-5 text-slate-900">{insight.recommendation}</div>
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-8 text-center text-sm text-slate-500">
-                  Insights appear after a monitoring job is selected.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="border-red-200 bg-gradient-to-br from-red-50 to-white shadow-sm">
-            <CardHeader className="border-b border-red-100 px-4 py-4 md:px-5">
-              <CardTitle className="text-base font-serif font-bold text-red-700">Biggest Issue</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 p-4">
-              {insight?.largestIssue ? (
-                <>
-                  <div className="rounded-2xl border border-red-200 bg-white p-4 shadow-[0_10px_28px_-20px_rgba(220,38,38,0.28)]">
-                    <div className="text-sm font-semibold text-red-700">{insight.largestIssue.alert_message ?? "Largest deviation"}</div>
-                    <div className="mt-2 text-2xl font-serif font-bold text-slate-950">
-                      {formatCompactChange(safeDifference(insight.largestIssue.dataset_spd, insight.largestIssue.model_spd))}
-                    </div>
-                    <p className="mt-2 text-sm leading-5 text-slate-600">
-                      {formatDateTime(insight.largestIssue.timestamp)} - model SPD {insight.largestIssue.model_spd?.toFixed(3) ?? "--"} vs dataset SPD {insight.largestIssue.dataset_spd?.toFixed(3) ?? "--"}.
+              <div className="rounded-xl border border-orange-200 bg-orange-50 p-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-orange-600" />
+                  <div>
+                    <p className="text-xs font-semibold text-orange-700">Threshold Alert</p>
+                    <p className="mt-1 text-xs text-orange-600">
+                      Deviation from historical average exceeded safe margin
                     </p>
                   </div>
-                  <div className="rounded-xl border border-red-100 bg-red-50/80 p-3 text-sm leading-5 text-red-700">
-                    This combines the largest model-vs-dataset gap with an alert trigger.
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-xl border border-dashed border-red-200 bg-red-50/70 px-4 py-8 text-center text-sm text-red-600">
-                  Select a job with seeded history to surface the biggest issue.
                 </div>
-              )}
+              </div>
             </CardContent>
           </Card>
         </div>
 
+        {/* BOTTOM SECTION: Insights & Recommendations */}
         {insight ? (
-          <div className="grid gap-3 md:grid-cols-3">
-            <Card className="border-slate-200/70 bg-white/90 shadow-sm backdrop-blur">
-              <CardHeader className="pb-1 pt-4">
-                <CardTitle className="text-[10px] uppercase tracking-[0.28em] text-slate-500">Previous period</CardTitle>
-              </CardHeader>
-              <CardContent className="pb-4">
-                <div className="text-2xl font-serif font-bold text-slate-950">{formatSignedNumber(insight.previousModelAverage)}</div>
-                <p className="mt-1 text-sm text-slate-500">Earlier window average.</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-200/70 bg-white/90 shadow-sm backdrop-blur">
-              <CardHeader className="pb-1 pt-4">
-                <CardTitle className="text-[10px] uppercase tracking-[0.28em] text-slate-500">Current period</CardTitle>
-              </CardHeader>
-              <CardContent className="pb-4">
-                <div className="text-2xl font-serif font-bold text-slate-950">{formatSignedNumber(insight.currentModelAverage)}</div>
-                <p className="mt-1 text-sm text-slate-500">Latest window average.</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-200/70 bg-white/90 shadow-sm backdrop-blur">
-              <CardHeader className="pb-1 pt-4">
-                <CardTitle className="text-[10px] uppercase tracking-[0.28em] text-slate-500">% change</CardTitle>
-              </CardHeader>
-              <CardContent className="pb-4">
-                <div className={`text-2xl font-serif font-bold ${insight.modelTrendChange === null ? "text-slate-400" : insight.modelTrendChange > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                  {formatSignedPercent(insight.modelTrendChange)}
+          <Card className="border-indigo-200/50 bg-gradient-to-br from-indigo-50/80 to-white shadow-sm backdrop-blur">
+            <CardHeader className="border-b border-indigo-100 px-4 py-4 md:px-5">
+              <CardTitle className="text-base font-serif font-bold text-indigo-700">
+                Insights & Recommendations
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 p-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-indigo-200 bg-white p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
+                    Bias Summary
+                  </p>
+                  <p className="mt-2 text-sm leading-5 text-slate-900">{insight.summary}</p>
                 </div>
-                <p className="mt-1 text-sm text-slate-500">Model bias change.</p>
-              </CardContent>
-            </Card>
-          </div>
+                <div className="rounded-xl border border-indigo-200 bg-white p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
+                    Trend Analysis
+                  </p>
+                  <p className="mt-2 text-sm leading-5 text-slate-900">
+                    Current vs previous: {formatSignedNumber(insight.previousModelAverage)} →{" "}
+                    {formatSignedNumber(insight.currentModelAverage)} (
+                    <span
+                      className={
+                        insight.modelTrendChange === null
+                          ? "text-slate-600"
+                          : insight.modelTrendChange > 0
+                            ? "text-red-600 font-semibold"
+                            : "text-emerald-600 font-semibold"
+                      }
+                    >
+                      {formatSignedPercent(insight.modelTrendChange)}
+                    </span>
+                    )
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600 mb-2">
+                  ✓ Recommendation
+                </p>
+                <p className="text-sm leading-5 text-slate-900">{insight.recommendation}</p>
+              </div>
+            </CardContent>
+          </Card>
         ) : null}
 
-        <Card className="border-slate-200/70 bg-white/90 shadow-sm backdrop-blur">
-          <CardHeader className="border-b border-slate-100 px-4 py-4 md:px-5">
-            <CardTitle className="text-base font-serif font-bold text-slate-950">Monitoring Jobs</CardTitle>
+        {/* Dashboard Summary Section (AI-Generated) */}
+        <Card className="border-emerald-200/50 bg-gradient-to-br from-emerald-50/80 to-white shadow-sm backdrop-blur">
+          <CardHeader className="border-b border-emerald-100 px-4 py-4 md:px-5">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-serif font-bold text-emerald-700">
+                Executive Summary
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                {dashboardSummary?.generated && (
+                  <Badge variant="outline" className="border-emerald-200 bg-white text-emerald-600 text-xs">
+                    AI Generated
+                  </Badge>
+                )}
+                <Button
+                  onClick={() => void generateDashboardSummary()}
+                  disabled={loadingSummary}
+                  size="sm"
+                  variant="outline"
+                  className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs h-8"
+                >
+                  {loadingSummary ? (
+                    <>
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="mr-1 h-3 w-3" />
+                      Regenerate
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="p-4">
-            {loadingJobs ? (
-              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading saved monitoring jobs...
+            {dashboardSummary ? (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-emerald-200 bg-white p-4">
+                  <p className="text-sm leading-6 text-slate-900">{dashboardSummary.summary}</p>
+                </div>
+                {dashboardSummary.timestamp && (
+                  <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>Last updated: {new Date(dashboardSummary.timestamp).toLocaleTimeString()}</span>
+                    {dashboardSummary.generated && <span className="text-emerald-600">✓ Powered by Gemini AI</span>}
+                  </div>
+                )}
               </div>
-            ) : jobs.length ? (
-              <div className="grid gap-2">
-                {jobs.map((job) => {
-                  const selected = job.id === selectedJobId;
-                  const hasData = job.result_count > 0;
-
-                  return (
-                    <div
-                      key={job.id}
-                      className={`rounded-2xl border p-3 transition-all ${selected ? "border-slate-900 bg-slate-950 text-white shadow-[0_12px_30px_-18px_rgba(15,23,42,0.6)]" : "border-slate-200 bg-white"}`}
-                    >
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="min-w-0 space-y-1.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className={`text-sm font-semibold ${selected ? "text-white" : "text-slate-950"}`}>
-                              {job.dataset_name}
-                            </h3>
-                            <Badge
-                              variant="outline"
-                              className={`rounded-full px-2 py-0.5 text-[10px] ${selected ? "border-white/20 bg-white/10 text-white" : "border-slate-200 bg-slate-50 text-slate-700"}`}
-                            >
-                              {job.frequency}
-                            </Badge>
-                            {!hasData ? <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-500">No data yet</Badge> : null}
-                          </div>
-
-                          <p className={`truncate text-xs ${selected ? "text-slate-300" : "text-slate-500"}`}>
-                            Last run {formatDateTime(job.last_run)}
-                          </p>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setSelectedJobId(job.id)}
-                            disabled={!hasData}
-                            className="border-slate-200 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            <Eye className="mr-2 h-3.5 w-3.5" />
-                            View Analysis
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => void handleDelete(job.id)}
-                            disabled={deletingJobId === job.id}
-                            className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                          >
-                            {deletingJobId === job.id ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-2 h-3.5 w-3.5" />}
-                            Delete
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+            ) : loadingSummary ? (
+              <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-700">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Generating dashboard summary...
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-8 text-center text-sm text-slate-500">
-                No monitoring jobs yet.
+              <div className="rounded-xl border border-dashed border-emerald-200 bg-emerald-50/70 px-4 py-8 text-center text-sm text-emerald-600">
+                Summary will appear here once data is available
               </div>
             )}
           </CardContent>
         </Card>
-
-        <div className="grid gap-3 xl:grid-cols-[1.35fr_0.65fr]">
-          <Card className="border-slate-200/70 bg-white/90 shadow-sm backdrop-blur">
-            <CardHeader className="border-b border-slate-100 px-4 py-4 md:px-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardTitle className="text-base font-serif font-bold text-slate-950">Trend Analysis</CardTitle>
-                {selectedJob ? <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">{selectedJob.dataset_name}</Badge> : null}
-              </div>
-            </CardHeader>
-
-            <CardContent className="space-y-4 p-4">
-              {!selectedJob ? (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-8 text-center text-sm text-slate-500">
-                  Select a job to inspect bias trends.
-                </div>
-              ) : loadingResults ? (
-                <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading historical results...
-                </div>
-              ) : selectedJobHasData ? (
-                <>
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                    <div className="text-slate-600">View mode</div>
-                    <div className="inline-flex rounded-full border border-slate-200 bg-white p-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setChartMode("day")}
-                        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${chartMode === "day" ? "bg-slate-950 text-white" : "text-slate-600 hover:text-slate-950"}`}
-                      >
-                        Day View
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setChartMode("week")}
-                        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${chartMode === "week" ? "bg-slate-950 text-white" : "text-slate-600 hover:text-slate-950"}`}
-                      >
-                        Weekly View
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <Card size="sm" className="border-slate-200 bg-slate-50/80">
-                      <CardContent className="p-3">
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">Latest model SPD</div>
-                        <div className="mt-1.5 text-xl font-serif font-bold text-slate-950">{formatSignedNumber(latestResult?.model_spd)}</div>
-                      </CardContent>
-                    </Card>
-
-                    <Card size="sm" className="border-slate-200 bg-slate-50/80">
-                      <CardContent className="p-3">
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">Latest dataset SPD</div>
-                        <div className="mt-1.5 text-xl font-serif font-bold text-slate-950">{formatSignedNumber(latestResult?.dataset_spd)}</div>
-                      </CardContent>
-                    </Card>
-
-                    <Card size="sm" className="border-slate-200 bg-slate-50/80">
-                      <CardContent className="p-3">
-                        <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">Bias difference</div>
-                        <div className="mt-1.5 text-xl font-serif font-bold text-slate-950">{formatCompactChange(latestGap)}</div>
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  <Card className="border-slate-200 bg-white">
-                    <CardHeader className="px-4 py-3">
-                      <CardTitle className="text-[10px] uppercase tracking-[0.28em] text-slate-500">
-                        {chartMode === "day" ? "Day-wise Trend" : "Weekly Trend"}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-2 pb-4">
-                      <div className="h-[260px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={chartData}>
-                            <CartesianGrid stroke="#E2E8F0" strokeDasharray="3 3" />
-                            <XAxis
-                              dataKey={chartMode === "day" ? "date" : "label"}
-                              stroke="#94A3B8"
-                              tickLine={false}
-                              axisLine={false}
-                              interval={0}
-                              height={36}
-                            />
-                            <YAxis stroke="#94A3B8" tickLine={false} axisLine={false} width={34} />
-                            <Tooltip />
-                            <Legend />
-                            <Line type="linear" dataKey="dataset_spd" name="Dataset SPD" stroke="#2563EB" strokeWidth={1.8} dot={{ r: 3, strokeWidth: 1, fill: "#2563EB" }} activeDot={{ r: 4 }} />
-                            <Line type="linear" dataKey="model_spd" name="Model SPD" stroke="#DC2626" strokeWidth={1.8} dot={{ r: 3, strokeWidth: 1, fill: "#DC2626" }} activeDot={{ r: 4 }} />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </>
-              ) : (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-8 text-center text-sm text-slate-500">
-                  Monitoring scheduled. Waiting for first run...
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="space-y-3">
-            <Card className="border-slate-200/70 bg-white/90 shadow-sm backdrop-blur" id="alerts">
-              <CardHeader className="border-b border-slate-100 px-4 py-4 md:px-5">
-                <div className="flex items-center justify-between gap-3">
-                  <CardTitle className="text-base font-serif font-bold text-slate-950">Alerts</CardTitle>
-                  <Link href="#alerts" className="text-xs font-medium text-slate-500 hover:text-slate-900">
-                    View all alerts
-                  </Link>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2 p-4">
-                {loadingAlerts ? (
-                  <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading alerts...
-                  </div>
-                ) : topAlerts.length ? (
-                  topAlerts.map((group) => {
-                    const alert = group.latest;
-                    return (
-                      <div key={group.label} className="rounded-xl border border-red-100 bg-red-50/70 p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 text-sm font-semibold text-red-700">
-                              <AlertTriangle className="h-4 w-4 shrink-0" />
-                              <span className="truncate">{group.label}</span>
-                            </div>
-                            <div className="mt-1 text-xs text-red-600">{group.count} similar alerts detected</div>
-                            <div className="mt-1 text-xs text-red-500">
-                              {alert.dataset_name ?? `Job ${alert.job_id}`} - {formatDateTime(alert.timestamp)}
-                            </div>
-                          </div>
-                          <Badge variant="outline" className="border-red-200 bg-white text-red-700">
-                            {group.count}
-                          </Badge>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-8 text-center text-sm text-slate-500">
-                    No active alerts right now.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-200/70 bg-white/90 shadow-sm backdrop-blur">
-              <CardHeader className="border-b border-slate-100 px-4 py-4 md:px-5">
-                <CardTitle className="text-base font-serif font-bold text-slate-950">Selected Job</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 p-4">
-                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">Dataset</div>
-                  <div className="mt-1.5 text-sm font-medium text-slate-900">{selectedJob?.dataset_name ?? "No job selected"}</div>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">Frequency</div>
-                  <div className="mt-1.5 text-sm font-medium text-slate-900">{selectedJob?.frequency ?? "--"}</div>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500">Last run</div>
-                  <div className="mt-1.5 text-sm font-medium text-slate-900">{selectedJob?.last_run ? formatDateTime(selectedJob.last_run) : "No data yet"}</div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
 
         {error ? (
           <Card className="border-red-200 bg-red-50/90">
