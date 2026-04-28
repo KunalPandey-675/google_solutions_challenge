@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,11 @@ export async function POST(request: Request) {
       return Response.json({ error: "No file provided" }, { status: 400 });
     }
 
-    const uploadsDir = path.join(process.cwd(), "uploads");
+    // Use /tmp for serverless (Vercel) and local uploads folder for development
+    const uploadsDir = process.env.NODE_ENV === "production" 
+      ? path.join("/tmp", "uploads")
+      : path.join(process.cwd(), "uploads");
+    
     await mkdir(uploadsDir, { recursive: true });
 
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
