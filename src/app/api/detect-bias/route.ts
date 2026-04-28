@@ -2,6 +2,8 @@ import axios from "axios";
 
 export const runtime = "nodejs";
 
+const BACKEND_BASE = process.env.BACKEND_URL || "http://localhost:5001";
+
 type DetectBiasRequestBody = {
   datasetPath?: string;
   api_url?: string;
@@ -49,7 +51,7 @@ export async function POST(request: Request) {
       payload.api_url = apiUrl;
     }
 
-    const { data } = await axios.post("http://localhost:5001/detect-bias", payload);
+    const { data } = await axios.post(`${BACKEND_BASE}/detect-bias`, payload);
 
     return Response.json(data);
   } catch (error) {

@@ -2,6 +2,8 @@ import axios from "axios";
 
 export const runtime = "nodejs";
 
+const BACKEND_BASE = process.env.BACKEND_URL || "http://localhost:5001";
+
 type CreateJobRequestBody = {
   dataset_path?: string;
   api_url?: string;
@@ -59,7 +61,7 @@ export async function POST(request: Request) {
       payload.frequency = frequency;
     }
 
-    const { data } = await axios.post("http://localhost:5001/create-job", payload);
+    const { data } = await axios.post(`${BACKEND_BASE}/create-job`, payload);
 
     return Response.json(data);
   } catch (error) {

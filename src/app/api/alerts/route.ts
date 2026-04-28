@@ -2,6 +2,8 @@ import axios from "axios";
 
 export const runtime = "nodejs";
 
+const BACKEND_BASE = process.env.BACKEND_URL || "http://localhost:5001";
+
 function extractBackendErrorMessage(details: unknown, fallback: string, status?: number) {
   if (typeof details === "string") {
     const trimmed = details.trim();
@@ -31,7 +33,7 @@ function extractBackendErrorMessage(details: unknown, fallback: string, status?:
 
 export async function GET() {
   try {
-    const { data } = await axios.get("http://localhost:5001/alerts");
+    const { data } = await axios.get(`${BACKEND_BASE}/alerts`);
     return Response.json(data);
   } catch (error) {
     if (axios.isAxiosError(error)) {

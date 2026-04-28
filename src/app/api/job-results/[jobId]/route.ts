@@ -2,6 +2,8 @@ import axios from "axios";
 
 export const runtime = "nodejs";
 
+const BACKEND_BASE = process.env.BACKEND_URL || "http://localhost:5001";
+
 function extractBackendErrorMessage(details: unknown, fallback: string, status?: number) {
   if (typeof details === "string") {
     const trimmed = details.trim();
@@ -46,7 +48,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
   }
 
   try {
-    const { data } = await axios.get(`http://localhost:5001/job-results/${jobId}`);
+    const { data } = await axios.get(`${BACKEND_BASE}/job-results/${jobId}`);
     return Response.json(data);
   } catch (error) {
     if (axios.isAxiosError(error)) {

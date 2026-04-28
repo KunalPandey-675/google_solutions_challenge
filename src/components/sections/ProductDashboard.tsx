@@ -210,7 +210,7 @@ export function ProductDashboard() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const resolvedApiUrl = apiUrl.trim() || "http://localhost:8000/predict";
+      const resolvedApiUrl = apiUrl.trim() || process.env.NEXT_PUBLIC_MODEL_API_URL || "http://localhost:8000/predict";
 
       const uploadRes = await fetch("/api/upload", {
         method: "POST",
