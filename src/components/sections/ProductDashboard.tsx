@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState, type ChangeEvent } from "react";
-import { AlertCircle, CheckCircle2, Clock3, Info, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock3, Info, Loader2, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { usePolling } from "@/hooks/usePolling";
 
 type AnalyzeApiResponse = {
   success: boolean;
@@ -34,6 +35,15 @@ type CreateJobResponse = {
   job_id: number;
   next_run?: string | null;
   error?: string;
+};
+
+type JobSummary = {
+  id: number;
+  dataset_name: string;
+  frequency: string;
+  last_run: string | null;
+  result_count: number;
+  alert_count: number;
 };
 
 type MonitoringConfig = {
@@ -96,52 +106,32 @@ export function ProductDashboard() {
   const [analysisResult, setAnalysisResult] = useState<AnalyzeApiResponse | null>(null);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [monitoringMessage, setMonitoringMessage] = useState<string | null>(null);
-  const [monitoringConfigs, setMonitoringConfigs] = useState<MonitoringConfig[]>([]);
   const [currentTime, setCurrentTime] = useState(Date.now());
-  const [deletingJobId, setDeletingJobId] = useState<number | null>(null);
+  const [deletingJobId, setDeleteJobId] = useState<number | null>(null);
+  
+  // Fetch jobs from backend API with polling
+  const { data: jobsData, refetch: refetchJobs, isLoading: isRefreshing } = usePolling<{
+    success?: boolean;
+    jobs?: JobSummary[];
+    error?: string;
+  }>("/api/jobs", {
+    interval: 5000, // Poll every 5 seconds
+    enabled: true,
+  });
 
-  useEffect(() => {
-    try {
-      const storedConfigs = window.localStorage.getItem(MONITORING_STORAGE_KEY);
-      if (storedConfigs) {
-        const parsed = JSON.parse(storedConfigs) as Array<MonitoringConfig & { jobId?: number }>;
-        if (Array.isArray(parsed)) {
-          const normalized = parsed
-            .map((item) => {
-              const id =
-                typeof item.id === "number"
-                  ? item.id
-                  : typeof item.jobId === "number"
-                    ? item.jobId
-                    : Number.NaN;
+  // Convert job data to display format
+  const monitoringConfigs: MonitoringConfig[] = (jobsData?.jobs ?? []).map((job) => ({
+    id: job.id,
+    datasetName: job.dataset_name,
+    apiUrl: "Backend API",
+    frequency: (job.frequency as "daily" | "weekly") ?? "daily",
+    nextRun: job.last_run,
+    createdAt: new Date().toISOString(),
+  }));
 
-              if (!Number.isFinite(id)) {
-                return null;
-              }
-
-              return {
-                id,
-                datasetName: item.datasetName,
-                apiUrl: item.apiUrl,
-                frequency: item.frequency,
-                nextRun: item.nextRun,
-                createdAt: item.createdAt,
-              } as MonitoringConfig;
-            })
-            .filter((item): item is MonitoringConfig => item !== null);
-
-          setMonitoringConfigs(dedupeMonitoringConfigs(normalized));
-        }
-      }
-
-    } catch {
-      window.localStorage.removeItem(MONITORING_STORAGE_KEY);
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(MONITORING_STORAGE_KEY, JSON.stringify(monitoringConfigs));
-  }, [monitoringConfigs]);
+  const handleRefresh = async () => {
+    await refetchJobs();
+  };
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 30_000);
@@ -158,7 +148,7 @@ export function ProductDashboard() {
 
     console.log("Deleting job ID:", job.id);
 
-    setDeletingJobId(job.id);
+    setDeleteJobId(job.id);
     setError(null);
     setMonitoringMessage(null);
 
@@ -170,7 +160,6 @@ export function ProductDashboard() {
       const data = (await response.json().catch(() => ({}))) as { success?: boolean; error?: string };
       if (!response.ok || !data.success) {
         if (response.status === 404 && typeof data.error === "string" && /not found/i.test(data.error)) {
-          setMonitoringConfigs((previous) => previous.filter((item) => item.id !== job.id));
           setMonitoringMessage("Monitoring setup deleted");
           return;
         }
@@ -178,12 +167,12 @@ export function ProductDashboard() {
         throw new Error(data.error ?? "Failed to delete monitoring setup");
       }
 
-      setMonitoringConfigs((previous) => previous.filter((item) => item.id !== job.id));
       setMonitoringMessage("Monitoring setup deleted");
+      // Polling will automatically update the job list from the backend
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "Failed to delete monitoring setup");
     } finally {
-      setDeletingJobId(null);
+      setDeleteJobId(null);
     }
   };
 
@@ -278,17 +267,8 @@ export function ProductDashboard() {
         throw new Error(createJobData.error ?? "Failed to create monitoring setup");
       }
 
-      const config: MonitoringConfig = {
-        id: createJobData.job_id,
-        datasetName: file.name,
-        apiUrl: apiUrl.trim() || "Local default model",
-        frequency,
-        nextRun: createJobData.next_run ?? null,
-        createdAt: new Date().toISOString(),
-      };
-
-      setMonitoringConfigs((previous) => [config, ...previous.filter((item) => item.id !== config.id)]);
       setMonitoringMessage("Monitoring enabled and initial analysis completed");
+      // The polling hook will automatically fetch the updated job list from the backend
     } catch (submitError) {
       if (submitError instanceof Error && submitError.message === "Failed to fetch") {
         setError("Failed to reach the backend. Make sure the Next.js app and Flask API are both running.");
@@ -506,9 +486,21 @@ export function ProductDashboard() {
         <div className="mt-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-serif font-bold text-slate-900">Monitoring Configurations</h2>
-            <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-200">
-              {monitoringConfigs.length} saved
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                size="sm"
+                variant="outline"
+                className="gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+                {isRefreshing ? "Refreshing..." : "Refresh"}
+              </Button>
+              <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-200">
+                {monitoringConfigs.length} saved
+              </Badge>
+            </div>
           </div>
 
           <div className="space-y-3">

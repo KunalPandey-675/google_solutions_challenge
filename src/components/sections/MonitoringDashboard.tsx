@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, Eye, Loader2, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Eye, Loader2, RefreshCw, Trash2 } from "lucide-react";
+import { usePolling } from "@/hooks/usePolling";
 import {
   CartesianGrid,
   Legend,
@@ -224,56 +225,33 @@ function groupAlerts(alerts: AlertItem[]) {
 }
 
 export function MonitoringDashboard() {
-  const [jobs, setJobs] = useState<JobSummary[]>([]);
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
-  const [results, setResults] = useState<MonitoringResult[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [chartMode, setChartMode] = useState<ChartMode>("day");
-  const [loadingJobs, setLoadingJobs] = useState(true);
-  const [loadingAlerts, setLoadingAlerts] = useState(true);
-  const [loadingResults, setLoadingResults] = useState(false);
+  const [results, setResults] = useState<MonitoringResult[]>([]);
   const [deletingJobId, setDeletingJobId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadingResults, setLoadingResults] = useState(false);
 
-  useEffect(() => {
-    const loadJobs = async () => {
-      setLoadingJobs(true);
-      try {
-        const response = await fetch("/api/jobs");
-        const data = (await response.json().catch(() => ({}))) as { success?: boolean; jobs?: JobSummary[]; error?: string };
-        if (!response.ok || !data.success) {
-          throw new Error(data.error ?? "Failed to load jobs");
-        }
+  // Poll jobs from backend
+  const { data: jobsData, isLoading: loadingJobs, refetch: refetchJobs } = usePolling<{ success?: boolean; jobs?: JobSummary[]; error?: string }>(
+    "/api/jobs",
+    { interval: 5000 }
+  );
 
-        setJobs((data.jobs ?? []).filter((job) => job.result_count >= 0));
-      } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : "Failed to load jobs");
-      } finally {
-        setLoadingJobs(false);
-      }
-    };
+  // Poll alerts from backend
+  const { data: alertsData, isLoading: loadingAlerts, refetch: refetchAlerts } = usePolling<{ success?: boolean; alerts?: AlertItem[]; error?: string }>(
+    "/api/alerts",
+    { interval: 5000 }
+  );
 
-    const loadAlerts = async () => {
-      setLoadingAlerts(true);
-      try {
-        const response = await fetch("/api/alerts");
-        const data = (await response.json().catch(() => ({}))) as { success?: boolean; alerts?: AlertItem[]; error?: string };
-        if (!response.ok || !data.success) {
-          throw new Error(data.error ?? "Failed to load alerts");
-        }
+  const jobs = (jobsData?.jobs ?? []).filter((job) => job.result_count >= 0);
+  const alerts = alertsData?.alerts ?? [];
 
-        setAlerts(data.alerts ?? []);
-      } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : "Failed to load alerts");
-      } finally {
-        setLoadingAlerts(false);
-      }
-    };
+  const handleRefreshAll = async () => {
+    await Promise.all([refetchJobs(), refetchAlerts()]);
+  };
 
-    void loadJobs();
-    void loadAlerts();
-  }, []);
-
+  // Auto-select first job when jobs load
   useEffect(() => {
     if (selectedJobId !== null || jobs.length === 0) {
       return;
@@ -282,6 +260,7 @@ export function MonitoringDashboard() {
     setSelectedJobId(jobs[0].id);
   }, [jobs, selectedJobId]);
 
+  // Poll job results when job is selected
   useEffect(() => {
     if (selectedJobId === null) {
       setResults([]);
@@ -310,6 +289,13 @@ export function MonitoringDashboard() {
     };
 
     void loadResults();
+
+    // Poll results for the selected job
+    const resultsInterval = setInterval(() => {
+      void loadResults();
+    }, 5000);
+
+    return () => clearInterval(resultsInterval);
   }, [selectedJobId]);
 
   const selectedJob = useMemo(() => jobs.find((job) => job.id === selectedJobId) ?? null, [jobs, selectedJobId]);
@@ -347,19 +333,18 @@ export function MonitoringDashboard() {
         throw new Error(data.error ?? "Failed to delete monitoring setup");
       }
 
-      setJobs((previous) => previous.filter((job) => job.id !== jobId));
-      setAlerts((previous) => previous.filter((alert) => alert.job_id !== jobId));
-      setResults((previous) => previous.filter((result) => result.job_id !== jobId));
-
-      if (selectedJobId === jobId) {
-        const remaining = jobs.filter((job) => job.id !== jobId);
-        setSelectedJobId(remaining[0]?.id ?? null);
-      }
+      // Polling will automatically update the job list
+      setMonitoringMessage("Monitoring setup deleted");
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "Failed to delete monitoring setup");
     } finally {
       setDeletingJobId(null);
     }
+  };
+
+  const setMonitoringMessage = (message: string) => {
+    // Optional: Add a toast notification here if you want to display deletion feedback
+    console.log(message);
   };
 
   return (
@@ -374,9 +359,22 @@ export function MonitoringDashboard() {
             Back to audit
           </Link>
 
-          <Badge variant="outline" className="rounded-full border-slate-200 bg-white/80 px-3 py-1 text-slate-600">
-            {loadingJobs ? "Loading jobs..." : `${totalJobs} jobs`}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleRefreshAll}
+              disabled={loadingJobs || loadingAlerts}
+              size="sm"
+              variant="outline"
+              className="gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${loadingJobs || loadingAlerts ? "animate-spin" : ""}`} />
+              {loadingJobs || loadingAlerts ? "Refreshing..." : "Refresh"}
+            </Button>
+
+            <Badge variant="outline" className="rounded-full border-slate-200 bg-white/80 px-3 py-1 text-slate-600">
+              {loadingJobs ? "Loading jobs..." : `${totalJobs} jobs`}
+            </Badge>
+          </div>
         </div>
 
         <div className="grid gap-3 lg:grid-cols-[1.45fr_0.55fr_0.55fr]">
