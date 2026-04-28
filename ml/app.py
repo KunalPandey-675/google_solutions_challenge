@@ -1627,11 +1627,10 @@ def create_job() -> Any:
     try:
         payload = request.get_json(silent=True) or {}
         dataset_path_raw = payload.get("dataset_path") or payload.get("datasetPath")
+        file_content_raw = payload.get("file_content")
+        file_name_raw = payload.get("file_name", "dataset.csv")
         api_url_raw = payload.get("api_url") or payload.get("apiUrl")
         frequency_raw = payload.get("frequency", "manual")
-
-        if not isinstance(dataset_path_raw, str) or not dataset_path_raw.strip():
-            return jsonify({"success": False, "error": "dataset_path is required"}), 400
 
         if not isinstance(api_url_raw, str) or not api_url_raw.strip():
             return jsonify({"success": False, "error": "api_url is required"}), 400
@@ -1643,10 +1642,26 @@ def create_job() -> Any:
         if frequency not in {"daily", "weekly", "manual"}:
             return jsonify({"success": False, "error": "frequency must be daily, weekly, or manual"}), 400
 
-        dataset_path = os.path.abspath(dataset_path_raw.strip())
+        # Handle file_content from Vercel/serverless environments
+        if file_content_raw:
+            import base64
+            import tempfile
+            try:
+                file_bytes = base64.b64decode(file_content_raw)
+                # Create a temporary file
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+                    tmp.write(file_bytes)
+                    dataset_path = tmp.name
+            except Exception as e:
+                return jsonify({"success": False, "error": f"Failed to decode file content: {str(e)}"}), 400
+        elif dataset_path_raw:
+            dataset_path = os.path.abspath(dataset_path_raw.strip())
+            if not os.path.exists(dataset_path):
+                return jsonify({"success": False, "error": "dataset file does not exist"}), 404
+        else:
+            return jsonify({"success": False, "error": "dataset_path or file_content is required"}), 400
+
         api_url = api_url_raw.strip()
-        if not os.path.exists(dataset_path):
-            return jsonify({"success": False, "error": "dataset file does not exist"}), 404
 
         created_at = datetime.utcnow()
         next_run = _compute_next_run(created_at, frequency)
@@ -1760,15 +1775,30 @@ def detect_bias() -> Any:
     try:
         payload = request.get_json(silent=True) or {}
         dataset_path = payload.get("datasetPath") or payload.get("dataset_path")
+        file_content_raw = payload.get("file_content")
+        file_name_raw = payload.get("file_name", "dataset.csv")
         api_url = payload.get("api_url") or os.getenv("MODEL_API_URL")
-
-        if not isinstance(dataset_path, str) or not dataset_path.strip():
-            return jsonify({"success": False, "error": "dataset_path is required"}), 400
 
         if not isinstance(api_url, str) or not api_url.strip():
             return jsonify({"success": False, "error": "Model API URL required"}), 400
 
-        dataset_path = dataset_path.strip()
+        # Handle file_content from Vercel/serverless environments
+        if file_content_raw:
+            import base64
+            import tempfile
+            try:
+                file_bytes = base64.b64decode(file_content_raw)
+                # Create a temporary file
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+                    tmp.write(file_bytes)
+                    dataset_path = tmp.name
+            except Exception as e:
+                return jsonify({"success": False, "error": f"Failed to decode file content: {str(e)}"}), 400
+        elif not isinstance(dataset_path, str) or not dataset_path.strip():
+            return jsonify({"success": False, "error": "dataset_path is required"}), 400
+        else:
+            dataset_path = dataset_path.strip()
+
         api_url = api_url.strip()
         logger.info("Received dataset path: %s", dataset_path)
         logger.info("Using model API URL: %s", api_url)

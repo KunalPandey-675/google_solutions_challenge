@@ -1,4 +1,6 @@
 import axios from "axios";
+import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 
 export const runtime = "nodejs";
 
@@ -46,9 +48,25 @@ export async function POST(request: Request) {
       return Response.json({ error: "datasetPath is required" }, { status: 400 });
     }
 
-    const payload: Record<string, string> = { dataset_path: datasetPath };
+    const payload: Record<string, any> = {};
+    
     if (apiUrl) {
       payload.api_url = apiUrl;
+    }
+
+    // Try to read file content for Vercel/serverless environments
+    // If successful, send as base64; otherwise send as path (for local dev)
+    if (existsSync(datasetPath)) {
+      try {
+        const fileBuffer = await readFile(datasetPath);
+        payload.file_content = fileBuffer.toString("base64");
+        payload.file_name = datasetPath.split("/").pop() || "dataset.csv";
+      } catch (readError) {
+        // If we can't read, fall back to sending the path
+        payload.dataset_path = datasetPath;
+      }
+    } else {
+      payload.dataset_path = datasetPath;
     }
 
     const { data } = await axios.post(`${BACKEND_BASE}/detect-bias`, payload);
