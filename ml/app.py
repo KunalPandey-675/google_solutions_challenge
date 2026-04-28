@@ -37,6 +37,11 @@ except ImportError:  # pragma: no cover - optional dependency
 
 app = Flask(__name__)
 
+
+@app.route("/health", methods=["GET"])
+def _health() -> dict[str, str]:
+    return {"status": "ok"}
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s - %(message)s",
@@ -1788,4 +1793,5 @@ if os.getenv("BIAS_MONITOR_DISABLE_SCHEDULER") != "1":
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=False)
+    port = int(os.environ.get("PORT", 5001))
+    app.run(host="0.0.0.0", port=port, debug=False)

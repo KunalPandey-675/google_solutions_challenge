@@ -1,0 +1,13 @@
+## Inferred runtime dependencies for this project
+# Pin aif360 to the version found in the environment; others left unpinned.
+aif360==0.6.1
+pandas
+requests
+Flask
+SQLAlchemy
+google-generativeai
+langchain
+langchain-google-genai
+scikit-learn
+numpy
+scipy
