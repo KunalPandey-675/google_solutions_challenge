@@ -417,6 +417,29 @@ export function ProductDashboard() {
                 <p className="mt-2 text-xs text-slate-500">
                   Leave this empty to use the backend default model endpoint.
                 </p>
+                <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">Test Model API (optional)</div>
+                    <a
+                      href="https://google-solutions-challenge-1.onrender.com/predict"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-slate-700 underline"
+                    >
+                      https://google-solutions-challenge-1.onrender.com/predict
+                    </a>
+                    <div className="text-xs text-slate-500">Use this endpoint for quick testing with uploaded datasets.</div>
+                  </div>
+                  <div className="ml-4 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard?.writeText("https://google-solutions-challenge-1.onrender.com/predict")}
+                      className="rounded-full bg-slate-900 px-3 py-1 text-sm font-medium text-white hover:bg-slate-800"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <Button
